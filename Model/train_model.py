@@ -1,40 +1,48 @@
 import pandas as pd
+import re
+import nltk
 import pickle
-from tqdm import tqdm
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report
+import os
 
-df=pd.read_csv("Model/dataset/stock_data_preprocessed.csv")
+nltk.download("stopwords")
+nltk.download("punkt")
+nltk.download("wordnet")
 
-X=df["Cleaned_Text"].fillna("")
-y=df["Sentiment"]
+df = pd.read_csv("Model/stock_data.csv")
+stop_words = set(stopwords.words("english"))
+lemmatizer = WordNetLemmatizer()
 
-print(" Converting text into TF-IDF features.....")
-vectorizer=TfidfVectorizer(max_features=5000)
-X_tfidf=vectorizer.fit_transform(tqdm(X, desc="Processing text"))
+def clean_text(text):
+    if pd.isna(text):
+        return ""
+    text = str(text).lower()
+    text = re.sub(r"http\S+|www\S+|https\S+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"[^a-zA-Z\s]", "", text)
+    tokens = word_tokenize(text)
+    tokens = [word for word in tokens if word not in stop_words]
+    tokens = [lemmatizer.lemmatize(word) for word in tokens]
+    return " ".join(tokens)
 
-X_train, X_test, y_train, y_test= train_test_split(X_tfidf, y, test_size=0.2, random_state=42)
+df["Cleaned_Text"] = df["Text"].apply(clean_text)
 
+vectorizer = TfidfVectorizer()
+X = vectorizer.fit_transform(df["Cleaned_Text"])
+y = df["Sentiment"]
 
-print("Training Logistic Regression model")
-model=LogisticRegression()
-for _ in tqdm(range(1), desc="Training model"):
-    model.fit(X_train, y_train)
+model = LogisticRegression(max_iter=200)
+model.fit(X, y)
 
-y_pred= model.predict(X_test)
-accuracy=accuracy_score(y_test, y_pred)
+# Ensure Backend/model directory exists
+os.makedirs("../Backend/model", exist_ok=True)
 
-print("Model accuracy: {accuracy:.4f}")
-print("\n Classification report:\n", classification_report(y_test, y_pred))
+with open("../Backend/model/tfidf_vectorizer.pkl", "wb") as f:
+    pickle.dump(vectorizer, f)
+with open("../Backend/model/sentiment_model.pkl", "wb") as f:
+    pickle.dump(model, f)
 
-
-print("Saving model and vectorizer.....")
-with open("sentiment_model.pkl","wb") as model_file:
-    pickle.dump(model, model_file)
-
-with open("Tfidf_vectorizer.pkl","wb") as vec_file:
-    pickle.dump(vectorizer, vec_file)
-
-print("Model training complete.")
+print("Model and vectorizer saved!")
